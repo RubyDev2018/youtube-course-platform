@@ -1,22 +1,33 @@
 import { createClient } from '@/lib/supabase/server'
 import { getUser } from '@/lib/auth/session'
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  isSameOriginRequest,
+  isValidUuid,
+  safeRedirectPath,
+} from '@/lib/security/request-validation'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ videoId: string }> }
+  { params }: { params: Promise<{ videoId: string }> },
 ) {
   try {
-    const { videoId } = await params
-    const user = await getUser()
+    if (!isSameOriginRequest(request)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
+    const { videoId } = await params
+    if (!isValidUuid(videoId)) {
+      return NextResponse.json({ error: 'Invalid videoId' }, { status: 400 })
+    }
+
+    const user = await getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const supabase = await createClient()
 
-    // 既存の進捗を確認
     const { data: existingProgress } = await supabase
       .from('user_progress')
       .select('id, completed')
@@ -25,37 +36,37 @@ export async function POST(
       .single()
 
     if (existingProgress) {
-      // 既存の進捗がある場合は、完了状態をトグル
       const { error } = await supabase
         .from('user_progress')
         .update({
           completed: !existingProgress.completed,
-          completed_at: !existingProgress.completed ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString()
+          completed_at: !existingProgress.completed
+            ? new Date().toISOString()
+            : null,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', existingProgress.id)
 
       if (error) throw error
     } else {
-      // 新規の場合は作成
-      const { error } = await supabase
-        .from('user_progress')
-        .insert({
-          user_id: user.id,
-          video_id: videoId,
-          completed: true,
-          completed_at: new Date().toISOString()
-        })
+      const { error } = await supabase.from('user_progress').insert({
+        user_id: user.id,
+        video_id: videoId,
+        completed: true,
+        completed_at: new Date().toISOString(),
+      })
 
       if (error) throw error
     }
 
-    // リダイレクト先のURLを取得
-    const referer = request.headers.get('referer') || '/'
-    return NextResponse.redirect(referer)
-
+    const redirectTo = safeRedirectPath(request.headers.get('referer'), request)
+    return NextResponse.redirect(new URL(redirectTo, request.url))
   } catch (error) {
-    console.error('Error updating progress:', error)
+    // Log a stable error code, not the raw Postgres message — avoids leaking
+    // schema details to the platform log.
+    console.error('progress_complete_failed', {
+      code: (error as { code?: string } | null)?.code,
+    })
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

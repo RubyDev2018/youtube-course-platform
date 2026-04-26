@@ -1,20 +1,41 @@
 import { createClient } from '@/lib/supabase/server'
 import { getUser } from '@/lib/auth/session'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import {
+  isSameOriginRequest,
+  isValidUuid,
+} from '@/lib/security/request-validation'
 
 export async function POST(
-  _request: Request,
-  { params }: { params: Promise<{ videoId: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ videoId: string }> },
 ) {
   try {
-    const { videoId } = await params
-    const user = await getUser()
+    if (!isSameOriginRequest(request)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
+    const { videoId } = await params
+    if (!isValidUuid(videoId)) {
+      return NextResponse.json({ error: 'Invalid videoId' }, { status: 400 })
+    }
+
+    const user = await getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const supabase = await createClient()
+
+    const { data: video } = await supabase
+      .from('videos')
+      .select('id')
+      .eq('id', videoId)
+      .single()
+
+    if (!video) {
+      return NextResponse.json({ error: 'Not Found' }, { status: 404 })
+    }
 
     const { data: existing } = await supabase
       .from('user_progress')
@@ -47,7 +68,9 @@ export async function POST(
 
     return NextResponse.json({ ok: true })
   } catch (error) {
-    console.error('auto-complete error', error)
+    console.error('auto_complete_failed', {
+      code: (error as { code?: string } | null)?.code,
+    })
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

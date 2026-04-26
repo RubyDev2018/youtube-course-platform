@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { generateSlug, validateSlug } from '@/lib/admin/slug'
 
 export default function NewCoursePage() {
   const router = useRouter()
@@ -20,9 +21,15 @@ export default function NewCoursePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError(null)
 
+    const slugError = validateSlug(formData.slug)
+    if (slugError) {
+      setError(slugError)
+      return
+    }
+
+    setLoading(true)
     try {
       const supabase = createClient()
 
@@ -33,8 +40,10 @@ export default function NewCoursePage() {
       if (error) throw error
 
       router.push('/admin/courses')
-    } catch (err: any) {
-      setError(err.message)
+    } catch {
+      // Avoid leaking Postgres error detail (constraint name, column, etc.)
+      // back to the user; show a generic message and rely on logs for triage.
+      setError('講座の作成に失敗しました。スラッグの重複や入力内容を確認してください')
     } finally {
       setLoading(false)
     }
@@ -57,14 +66,9 @@ export default function NewCoursePage() {
 
     // Auto-generate slug from title
     if (name === 'title') {
-      const slug = value
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-
       setFormData(prev => ({
         ...prev,
-        slug: slug,
+        slug: generateSlug(value),
       }))
     }
   }
