@@ -4,7 +4,16 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { categoryNameToSlug } from '@/lib/categories'
 
-type Section = { id: string; videos?: { id: string }[] }
+type CourseRow = {
+  id: string
+  title: string
+  description: string | null
+  thumbnail_url: string | null
+  slug: string | null
+  category: string | null
+  section_count: number | null
+  video_count: number | null
+}
 
 export default async function SearchPage({
   searchParams,
@@ -16,34 +25,24 @@ export default async function SearchPage({
 
   const supabase = await createClient()
 
-  let courses: Array<{
-    id: string
-    title: string
-    description: string | null
-    thumbnail_url: string | null
-    slug: string | null
-    category: string | null
-    sections: Section[]
-  }> = []
+  let courses: CourseRow[] = []
 
-  if (query) {
-    // title / description / category を ilike で OR 検索
-    const pattern = `%${query}%`
+  // Strip PostgREST-significant characters from the user input before
+  // splicing it into a `.or()` filter string. Without this, `,` `(` `)` and
+  // `*` would let a crafted query re-shape the filter (e.g. inject
+  // `is_published.eq.false` to surface unpublished drafts). `%` and `_` are
+  // also escaped because they are LIKE wildcards.
+  const sanitizedQuery = query
+    .replace(/[(),\\"']/g, ' ')
+    .replace(/[%_]/g, (c) => `\\${c}`)
+    .trim()
+
+  if (sanitizedQuery) {
+    const pattern = `%${sanitizedQuery}%`
     const { data } = await supabase
-      .from('courses')
+      .from('courses_with_stats')
       .select(
-        `
-        id,
-        title,
-        description,
-        thumbnail_url,
-        slug,
-        category,
-        sections (
-          id,
-          videos ( id )
-        )
-      `
+        'id, title, description, thumbnail_url, slug, category, section_count, video_count'
       )
       .eq('is_published', true)
       .or(
@@ -54,13 +53,7 @@ export default async function SearchPage({
     courses = data ?? []
   }
 
-  const list = courses.map((c) => ({
-    ...c,
-    videoCount:
-      c.sections?.reduce((acc: number, s: Section) => acc + (s.videos?.length || 0), 0) ||
-      0,
-    sectionCount: c.sections?.length || 0,
-  }))
+  const list = courses
 
   return (
     <div className="min-h-screen bg-white">
@@ -144,9 +137,9 @@ export default async function SearchPage({
                     {course.description}
                   </p>
                   <div className="flex items-center text-xs text-gray-500 gap-3">
-                    <span>{course.videoCount}本の動画</span>
+                    <span>{course.video_count}本の動画</span>
                     <span>•</span>
-                    <span>{course.sectionCount}セクション</span>
+                    <span>{course.section_count}セクション</span>
                   </div>
                 </div>
               </Link>
