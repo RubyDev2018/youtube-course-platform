@@ -54,8 +54,13 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // セッションリフレッシュ（重要）
-  const { data: { session } } = await supabase.auth.getSession()
+  // 認証情報の取得とセッションリフレッシュ
+  // getSession() はクッキーを信頼するだけでサーバー検証を行わないため、
+  // 改ざん/期限切れトークンでもセッションが返ることがある。Supabase 公式は
+  // ミドルウェアでは getUser() の利用を推奨している。
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   // 保護されたルートの定義
   const protectedPaths = ['/dashboard']
@@ -69,18 +74,18 @@ export async function middleware(request: NextRequest) {
   )
 
   // 認証が必要なパスで、ログインしていない場合はログインページにリダイレクト
-  if ((isProtectedPath || isAdminPath) && !session) {
+  if ((isProtectedPath || isAdminPath) && !user) {
     const redirectUrl = new URL('/login', request.url)
     redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
   }
 
   // Admin権限チェック
-  if (isAdminPath && session) {
+  if (isAdminPath && user) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('is_admin')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single()
 
     if (!profile?.is_admin) {
@@ -89,7 +94,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // ログイン済みでログイン/サインアップページにアクセスした場合はホームにリダイレクト
-  if (session && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup')) {
+  if (user && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup')) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
