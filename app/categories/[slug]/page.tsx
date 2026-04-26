@@ -18,35 +18,15 @@ export default async function CategoryPage({
 
   const supabase = await createClient()
   const { data: courses } = await supabase
-    .from('courses')
+    .from('courses_with_stats')
     .select(
-      `
-      id,
-      title,
-      description,
-      thumbnail_url,
-      slug,
-      category,
-      sections (
-        id,
-        videos ( id )
-      )
-    `
+      'id, title, description, thumbnail_url, slug, category, section_count, video_count'
     )
     .eq('is_published', true)
     .eq('category', categoryName)
     .order('created_at', { ascending: false })
 
-  const list =
-    courses?.map((c) => ({
-      ...c,
-      videoCount:
-        c.sections?.reduce(
-          (acc: number, s: { videos?: { id: string }[] }) => acc + (s.videos?.length || 0),
-          0
-        ) || 0,
-      sectionCount: c.sections?.length || 0,
-    })) || []
+  const list = courses ?? []
 
   return (
     <div className="min-h-screen bg-white">
@@ -102,9 +82,9 @@ export default async function CategoryPage({
                     {course.description}
                   </p>
                   <div className="flex items-center text-xs text-gray-500 gap-3">
-                    <span>{course.videoCount}本の動画</span>
+                    <span>{course.video_count}本の動画</span>
                     <span>•</span>
-                    <span>{course.sectionCount}セクション</span>
+                    <span>{course.section_count}セクション</span>
                   </div>
                 </div>
               </Link>

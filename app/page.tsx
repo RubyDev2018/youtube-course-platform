@@ -8,7 +8,23 @@ import PreferenceLauncher from '@/components/features/preference-launcher'
 
 export default async function Home() {
   const supabase = await createClient()
-  const user = await getUser()
+
+  // ユーザー取得と講座一覧取得を並列化
+  const [user, coursesRes] = await Promise.all([
+    getUser(),
+    supabase
+      .from('courses_with_stats')
+      .select('id, title, description, thumbnail_url, slug, category, section_count, video_count')
+      .eq('is_published', true)
+      .order('created_at', { ascending: false }),
+  ])
+
+  const courses = coursesRes.data
+  const error = coursesRes.error
+
+  if (error) {
+    console.error('Error fetching courses:', error)
+  }
 
   // ログインユーザーの嗜好カテゴリーを取得
   let preferredCategories: string[] = []
@@ -19,30 +35,6 @@ export default async function Home() {
       .eq('id', user.id)
       .single()
     preferredCategories = (profile?.preferred_categories as string[] | null) ?? []
-  }
-
-  // 公開中の講座を取得
-  const { data: courses, error } = await supabase
-    .from('courses')
-    .select(`
-      id,
-      title,
-      description,
-      thumbnail_url,
-      slug,
-      category,
-      sections (
-        id,
-        videos (
-          id
-        )
-      )
-    `)
-    .eq('is_published', true)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Error fetching courses:', error)
   }
 
   // カテゴリー別の講座数をカウント（公開中のみ）
@@ -58,29 +50,18 @@ export default async function Home() {
   const empty = CATEGORIES.filter((c) => (categoryCounts.get(c.name) || 0) === 0)
   const visibleCategories = [...populated, ...empty].slice(0, 12)
 
-  // 各講座の動画数を計算
-  const coursesWithStats = courses?.map(course => {
-    const videoCount = course.sections?.reduce((total: number, section: any) => {
-      return total + (section.videos?.length || 0)
-    }, 0) || 0
-
-    return {
-      ...course,
-      videoCount,
-      sectionCount: course.sections?.length || 0
-    }
-  }) || []
+  const coursesList = courses ?? []
 
   // ホーム下部の統計セクション用：全体集計（公開中の講座ベース）
-  const totalVideos = coursesWithStats.reduce((acc, c) => acc + c.videoCount, 0)
-  const totalCourses = coursesWithStats.length
-  const totalSections = coursesWithStats.reduce((acc, c) => acc + c.sectionCount, 0)
+  const totalVideos = coursesList.reduce((acc, c) => acc + (c.video_count ?? 0), 0)
+  const totalCourses = coursesList.length
+  const totalSections = coursesList.reduce((acc, c) => acc + (c.section_count ?? 0), 0)
 
   // パーソナライズされたおすすめを作成
   const hasPreferences = preferredCategories.length > 0
   const personalized = hasPreferences
-    ? coursesWithStats.filter((c) => c.category && preferredCategories.includes(c.category))
-    : coursesWithStats
+    ? coursesList.filter((c) => c.category && preferredCategories.includes(c.category))
+    : coursesList
   const showingPersonalized = !!user && hasPreferences && personalized.length > 0
 
   return (
@@ -133,9 +114,9 @@ export default async function Home() {
             )}
           </div>
 
-          {(showingPersonalized ? personalized : coursesWithStats).length > 0 ? (
+          {(showingPersonalized ? personalized : coursesList).length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {(showingPersonalized ? personalized : coursesWithStats).map((course) => (
+              {(showingPersonalized ? personalized : coursesList).map((course) => (
                 <Link
                   key={course.id}
                   href={`/courses/${course.slug}`}
@@ -168,9 +149,9 @@ export default async function Home() {
                       {course.description}
                     </p>
                     <div className="flex items-center text-xs text-gray-500 gap-3">
-                      <span>{course.videoCount}本の動画</span>
+                      <span>{course.video_count}本の動画</span>
                       <span>•</span>
-                      <span>{course.sectionCount}セクション</span>
+                      <span>{course.section_count}セクション</span>
                     </div>
                   </div>
                 </Link>
