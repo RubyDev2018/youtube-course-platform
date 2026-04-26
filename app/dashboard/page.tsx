@@ -5,6 +5,16 @@ import Header from '@/components/layouts/header'
 import Image from 'next/image'
 import Link from 'next/link'
 
+type CourseProgressRow = {
+  course_id: string
+  course_title: string
+  course_slug: string | null
+  course_thumbnail_url: string | null
+  total_videos: number
+  completed_videos: number
+  last_activity_at: string | null
+}
+
 export default async function DashboardPage() {
   const user = await getUser()
 
@@ -12,35 +22,18 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  const profile = await getUserProfile(user.id)
+  await getUserProfile(user.id)
   const supabase = await createClient()
 
-  // ユーザーの進捗データを取得
-  const { data: progressData, error } = await supabase
-    .from('user_progress')
-    .select(`
-      id,
-      completed,
-      completed_at,
-      videos (
-        id,
-        title,
-        sections (
-          id,
-          title,
-          courses (
-            id,
-            title
-          )
-        )
-      )
-    `)
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false })
+  // 講座ごとの集計済み進捗を取得（per-video の行を取得しない）
+  const { data: courseProgress, error } = await supabase
+    .rpc('get_user_course_progress', { p_user_id: user.id })
 
   if (error) {
     console.error('Error fetching progress:', error)
   }
+
+  const rows = (courseProgress as CourseProgressRow[] | null) ?? []
 
   return (
     <div className="min-h-screen bg-white">
@@ -62,40 +55,81 @@ export default async function DashboardPage() {
             学習中の講座
           </h2>
 
-          {progressData && progressData.length > 0 ? (
+          {rows.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {progressData.map((progress: any) => (
-                <div
-                  key={progress.id}
-                  className="border border-gray-200 hover:shadow-lg transition-shadow cursor-pointer"
-                >
-                  <div className="aspect-video bg-gray-900 relative">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <svg className="w-16 h-16 text-white opacity-80" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
-                      </svg>
+              {rows.map((course) => {
+                const pct =
+                  course.total_videos > 0
+                    ? Math.round((course.completed_videos / course.total_videos) * 100)
+                    : 0
+                const isCompleted =
+                  course.completed_videos === course.total_videos && course.total_videos > 0
+
+                const cardInner = (
+                  <div className="border border-gray-200 hover:shadow-lg transition-shadow cursor-pointer">
+                    <div className="aspect-video bg-gray-900 relative">
+                      {course.course_thumbnail_url ? (
+                        <Image
+                          src={course.course_thumbnail_url}
+                          alt={course.course_title}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <svg
+                            className="w-16 h-16 text-white opacity-80"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
+                          </svg>
+                        </div>
+                      )}
+                      {isCompleted && (
+                        <div className="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 text-xs font-bold">
+                          完了
+                        </div>
+                      )}
                     </div>
-                    {progress.completed && (
-                      <div className="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 text-xs font-bold">
-                        完了
+                    <div className="p-3">
+                      <h3 className="text-sm font-bold text-gray-900 mb-2 line-clamp-2 hover:text-purple-600 transition-colors">
+                        {course.course_title}
+                      </h3>
+                      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                        <span>
+                          {course.completed_videos} / {course.total_videos}
+                        </span>
                       </div>
-                    )}
+                      <div className="w-full bg-gray-200 h-2 rounded">
+                        <div
+                          className="h-2 bg-purple-600 rounded"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">{pct}% 完了</p>
+                      {course.last_activity_at && (
+                        <p className="text-xs text-gray-500">
+                          最終学習:{' '}
+                          {new Date(course.last_activity_at).toLocaleDateString('ja-JP')}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="p-3">
-                    <h3 className="text-sm font-bold text-gray-900 mb-1 line-clamp-2 hover:text-purple-600 transition-colors">
-                      {progress.videos?.title}
-                    </h3>
-                    <p className="text-xs text-gray-600 mb-2 line-clamp-1">
-                      {progress.videos?.sections?.courses?.title}
-                    </p>
-                    {progress.completed_at && (
-                      <p className="text-xs text-gray-500">
-                        完了日: {new Date(progress.completed_at).toLocaleDateString('ja-JP')}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+                )
+
+                return course.course_slug ? (
+                  <Link
+                    key={course.course_id}
+                    href={`/courses/${course.course_slug}`}
+                  >
+                    {cardInner}
+                  </Link>
+                ) : (
+                  <div key={course.course_id}>{cardInner}</div>
+                )
+              })}
             </div>
           ) : (
             <div className="text-center py-20 bg-gray-50 border border-gray-200">
