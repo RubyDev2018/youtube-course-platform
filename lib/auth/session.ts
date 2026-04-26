@@ -1,16 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 
-export async function getSession() {
-  const supabase = await createClient()
-  const { data: { session }, error } = await supabase.auth.getSession()
-
-  if (error) {
-    console.error('Error getting session:', error)
-    return null
-  }
-
-  return session
-}
+// Note: there is intentionally no server-side getSession() helper here.
+// supabase.auth.getSession() trusts the cookie without verifying the JWT
+// against the auth server, so it must not be used for authorization on the
+// server. Always go through getUser() below.
 
 export async function getUser() {
   const supabase = await createClient()

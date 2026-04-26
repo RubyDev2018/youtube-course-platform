@@ -37,8 +37,28 @@ export default function VideoManager({
   const [loading, setLoading] = useState(false)
 
   const extractYouTubeId = (url: string): string | null => {
-    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/)
-    return match ? match[1] : null
+    // The previous regex matched "youtube.com/watch?v=" anywhere in the
+    // string, so https://attacker.example/youtube.com/watch?v=evilid would
+    // pass. Parse as a URL and require a known YouTube host plus the canonical
+    // 11-character video ID.
+    const YT_HOSTS = new Set([
+      'www.youtube.com',
+      'youtube.com',
+      'm.youtube.com',
+      'youtu.be',
+    ])
+    const ID_RE = /^[A-Za-z0-9_-]{11}$/
+    try {
+      const u = new URL(url.trim())
+      if (!YT_HOSTS.has(u.hostname)) return null
+      const id =
+        u.hostname === 'youtu.be'
+          ? u.pathname.slice(1).split('/')[0]
+          : u.searchParams.get('v')
+      return id && ID_RE.test(id) ? id : null
+    } catch {
+      return null
+    }
   }
 
   const handleAddVideo = async () => {

@@ -3,8 +3,18 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { validateSlug } from '@/lib/admin/slug'
 
-export default function CourseEditForm({ course }: { course: any }) {
+type CourseFormInput = {
+  id: string
+  title: string
+  description: string | null
+  slug: string | null
+  thumbnail_url: string | null
+  is_published: boolean | null
+}
+
+export default function CourseEditForm({ course }: { course: CourseFormInput }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -13,17 +23,23 @@ export default function CourseEditForm({ course }: { course: any }) {
   const [formData, setFormData] = useState({
     title: course.title,
     description: course.description || '',
-    slug: course.slug,
+    slug: course.slug ?? '',
     thumbnail_url: course.thumbnail_url || '',
-    is_published: course.is_published,
+    is_published: course.is_published ?? false,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError(null)
     setSuccess(false)
 
+    const slugError = validateSlug(formData.slug)
+    if (slugError) {
+      setError(slugError)
+      return
+    }
+
+    setLoading(true)
     try {
       const supabase = createClient()
 
@@ -36,8 +52,8 @@ export default function CourseEditForm({ course }: { course: any }) {
 
       setSuccess(true)
       router.refresh()
-    } catch (err: any) {
-      setError(err.message)
+    } catch {
+      setError('講座の更新に失敗しました。スラッグの重複や入力内容を確認してください')
     } finally {
       setLoading(false)
     }
@@ -76,8 +92,8 @@ export default function CourseEditForm({ course }: { course: any }) {
       if (error) throw error
 
       router.push('/admin/courses')
-    } catch (err: any) {
-      setError(err.message)
+    } catch {
+      setError('講座の削除に失敗しました')
       setLoading(false)
     }
   }
