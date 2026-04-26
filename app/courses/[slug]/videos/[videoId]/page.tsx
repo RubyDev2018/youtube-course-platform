@@ -54,22 +54,39 @@ export default async function VideoPage({ params }: VideoPageProps) {
     redirect(`/login?redirect=/courses/${slug}/videos/${videoId}`)
   }
 
-  // 同じコースの全動画を取得（ナビゲーション用）
-  const { data: allSections } = await supabase
-    .from('sections')
-    .select(`
-      id,
-      title,
-      order_index,
-      videos (
+  // 同じコースの全動画とユーザー進捗を並列取得
+  const [sectionsRes, progressRes] = await Promise.all([
+    supabase
+      .from('sections')
+      .select(`
         id,
         title,
         order_index,
-        is_free
-      )
-    `)
-    .eq('course_id', course?.id)
-    .order('order_index', { ascending: true })
+        videos (
+          id,
+          title,
+          order_index,
+          is_free
+        )
+      `)
+      .eq('course_id', course?.id)
+      .order('order_index', { ascending: true }),
+    user
+      ? supabase
+          .from('user_progress')
+          .select('video_id, completed, completed_at')
+          .eq('user_id', user.id)
+      : Promise.resolve({ data: null as null }),
+  ])
+
+  const allSections = sectionsRes.data
+  const allProgress = (progressRes && 'data' in progressRes ? progressRes.data : null) ?? []
+
+  // O(1) lookup map
+  const progressByVideoId = new Map<string, { completed: boolean; completed_at: string | null }>()
+  for (const p of allProgress as Array<{ video_id: string; completed: boolean; completed_at: string | null }>) {
+    progressByVideoId.set(p.video_id, { completed: p.completed, completed_at: p.completed_at })
+  }
 
   const sortedSections = allSections?.map((section: any) => ({
     ...section,
@@ -94,18 +111,8 @@ export default async function VideoPage({ params }: VideoPageProps) {
   const prevVideo = currentVideoIndex > 0 ? allVideos[currentVideoIndex - 1] : null
   const nextVideo = currentVideoIndex < totalVideos - 1 ? allVideos[currentVideoIndex + 1] : null
 
-  // ユーザーの進捗状況を取得（ログイン済みの場合）
-  let userProgress = null
-  if (user) {
-    const { data: progress } = await supabase
-      .from('user_progress')
-      .select('completed, completed_at')
-      .eq('user_id', user.id)
-      .eq('video_id', videoId)
-      .single()
-
-    userProgress = progress
-  }
+  // 現在の動画の進捗をマップから取得（追加フェッチ不要）
+  const userProgress = progressByVideoId.get(videoId) ?? null
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -219,6 +226,7 @@ export default async function VideoPage({ params }: VideoPageProps) {
                     {sec.videos.map((vid: any) => {
                       const isCurrentVideo = vid.id === videoId
                       const isLocked = !vid.is_free && !user
+                      const isCompleted = progressByVideoId.get(vid.id)?.completed === true
 
                       return (
                         <Link
@@ -237,6 +245,10 @@ export default async function VideoPage({ params }: VideoPageProps) {
                               ) : isCurrentVideo ? (
                                 <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
+                                </svg>
+                              ) : isCompleted ? (
+                                <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                 </svg>
                               ) : (
                                 <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
